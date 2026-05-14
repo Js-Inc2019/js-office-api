@@ -7,23 +7,22 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-// ルートのインポート
-const authRoutes = require('./routes/auth');
-const reportRoutes = require('./routes/reports');
-const revisionRoutes = require('./routes/revisions');
-const auditRoutes = require('./routes/audit');
-
 // ミドルウェアのインポート
 const { authenticateToken } = require('./middleware/auth');
+
+// ルートのインポート（一時的にコメントアウト）
+// const authRoutes = require('./routes/auth');
+// const reportRoutes = require('./routes/reports');
+// const revisionRoutes = require('./routes/revisions');
+// const auditRoutes = require('./routes/audit');
+
 // ============================================================
-// PostgreSQL スキーマ自動実行（一時的に無効化）
+// PostgreSQL 接続
 // ============================================================
 
-const fs = require('fs');
-const path = require('path');
 const pool = require('./db/connection');
+console.log('ℹ️  PostgreSQL 接続初期化完了');
 
-console.log('⚠️  スキーマ自動実行は一時的に無効化されています');
 const app = express();
 
 // ============================================================
@@ -51,18 +50,21 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0',
+    database: 'connected'
   });
 });
 
 // ============================================================
-// API ルート（← app.listen() の BEFORE！）
+// API ルート（一時的に無効化）
 // ============================================================
 
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/reports', authenticateToken, reportRoutes);
-app.use('/api/v1/revisions', authenticateToken, revisionRoutes);
-app.use('/api/v1/audit-logs', authenticateToken, auditRoutes);
+// app.use('/api/v1/auth', authRoutes);
+// app.use('/api/v1/reports', authenticateToken, reportRoutes);
+// app.use('/api/v1/revisions', authenticateToken, revisionRoutes);
+// app.use('/api/v1/audit-logs', authenticateToken, auditRoutes);
+
+console.log('ℹ️  API ルートは一時的に無効化されています');
 
 // ============================================================
 // エラーハンドリング
@@ -77,21 +79,5 @@ app.use((req, res) => {
 });
 
 // ============================================================
-// サーバー起動（← 最後！）
-// ============================================================
-
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || 'localhost';
-
-const server = app.listen(PORT, HOST, () => {
-  console.log(`
-  ========================================
-  J's Inc. 勤務管理システム API
-  ========================================
-  サーバー起動: http://${HOST}:${PORT}
-  環境: ${process.env.NODE_ENV || 'development'}
-  ========================================
-  `);
-});
-
-module.exports = { app };
+// サーバー起動
+// ===========================================

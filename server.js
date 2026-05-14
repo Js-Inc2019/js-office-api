@@ -77,10 +77,10 @@ app.get('/health', (req, res) => {
 // API ルート（一時的に無効化）
 // ============================================================
 
-// app.use('/api/v1/auth', authRoutes);
-// app.use('/api/v1/reports', authenticateToken, reportRoutes);
-// app.use('/api/v1/revisions', authenticateToken, revisionRoutes);
-// app.use('/api/v1/audit-logs', authenticateToken, auditRoutes);
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/reports', authenticateToken, reportRoutes);
+app.use('/api/v1/revisions', authenticateToken, revisionRoutes);
+app.use('/api/v1/audit-logs', authenticateToken, auditRoutes);
 
 console.log('ℹ️  API ルートは一時的に無効化されています');
 

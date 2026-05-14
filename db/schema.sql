@@ -112,10 +112,17 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE INDEX idx_setting_key ON settings(setting_key);
 
 INSERT INTO users (user_id, name, company, role, pin_hash, is_active)
-VALUES 
-  ('boss_001', '山本 親方', '株式会社J''s', 'boss', '/KFm', TRUE),
-  ('admin_001', '事務 太郎', '株式会社J''s', 'admin_office', '/KFm', TRUE)
+VALUES
+  ('boss_001', '山本 親方', '株式会社J''s', 'boss', '$2b$10$abcdefghijklmnopqrstuvwxyz123456789012345678901234567', TRUE),
+  ('admin_001', '事務 太郎', '株式会社J''s', 'admin_office', '$2b$10$abcdefghijklmnopqrstuvwxyz123456789012345678901234567', TRUE)
 ON CONFLICT (user_id) DO NOTHING;
+
+INSERT INTO settings (setting_id, setting_key, setting_value, description)
+VALUES
+  ('setting_001', 'standard_work_hours', '{"hours": 8, "start": "08:00", "end": "17:00"}', '標準勤務時間'),
+  ('setting_002', 'overtime_multiplier', '{"rate": 1.25}', '残業単価倍率'),
+  ('setting_003', 'revision_deadline_default', '{"days": 1}', '修正依頼デフォルト期限')
+ON CONFLICT (setting_id) DO NOTHING;
 
 INSERT INTO settings (setting_id, setting_key, setting_value, description)
 VALUES 

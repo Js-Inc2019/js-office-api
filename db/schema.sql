@@ -3,7 +3,7 @@
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS users (
-  user_id VARCHAR(32) PRIMARY KEY,
+  user_id VARCHAR(36) PRIMARY KEY,
   name VARCHAR(50) NOT NULL,
   company VARCHAR(100),
   role VARCHAR(20) DEFAULT 'worker' CHECK (role IN ('worker','boss','admin_office','admin_exec')),
@@ -19,7 +19,7 @@ CREATE INDEX idx_device_id ON users(device_id);
 CREATE INDEX idx_name ON users(name);
 
 CREATE TABLE IF NOT EXISTS reports (
-  report_id VARCHAR(32) PRIMARY KEY,
+  report_id VARCHAR(36) PRIMARY KEY,
   device_id VARCHAR(100) NOT NULL,
   worker_name VARCHAR(50) NOT NULL,
   worker_company VARCHAR(100),
@@ -48,8 +48,8 @@ CREATE INDEX idx_report_date ON reports(report_date);
 CREATE INDEX idx_worker_name ON reports(worker_name);
 
 CREATE TABLE IF NOT EXISTS revisions (
-  revision_id VARCHAR(32) PRIMARY KEY,
-  report_id VARCHAR(32) NOT NULL REFERENCES reports(report_id) ON DELETE CASCADE,
+  revision_id VARCHAR(36) PRIMARY KEY,
+  report_id VARCHAR(36) NOT NULL REFERENCES reports(report_id) ON DELETE CASCADE,
   revision_requester VARCHAR(50) NOT NULL,
   revision_reason JSONB,
   revision_comment TEXT,
@@ -68,8 +68,8 @@ CREATE INDEX idx_approval_status ON revisions(approval_status);
 CREATE INDEX idx_requested_at ON revisions(requested_at);
 
 CREATE TABLE IF NOT EXISTS hierarchy (
-  hierarchy_id VARCHAR(32) PRIMARY KEY,
-  parent_report_id VARCHAR(32) NOT NULL REFERENCES reports(report_id) ON DELETE CASCADE,
+  hierarchy_id VARCHAR(36) PRIMARY KEY,
+  parent_report_id VARCHAR(36) NOT NULL REFERENCES reports(report_id) ON DELETE CASCADE,
   parent_boss_id VARCHAR(50) NOT NULL,
   higher_boss_id VARCHAR(50),
   report_content TEXT,
@@ -83,13 +83,13 @@ CREATE INDEX idx_parent_boss_id ON hierarchy(parent_boss_id);
 CREATE INDEX idx_higher_boss_id ON hierarchy(higher_boss_id);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
-  log_id VARCHAR(32) PRIMARY KEY,
-  user_id VARCHAR(32),
+  log_id VARCHAR(36) PRIMARY KEY,
+  user_id VARCHAR(36),
   user_name VARCHAR(50),
   user_role VARCHAR(20),
   action_type VARCHAR(50) NOT NULL,
   target_table VARCHAR(50),
-  target_id VARCHAR(32),
+  target_id VARCHAR(36),
   changes_before JSONB,
   changes_after JSONB,
   timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -102,7 +102,7 @@ CREATE INDEX idx_action_type ON audit_logs(action_type);
 CREATE INDEX idx_target_id ON audit_logs(target_id);
 
 CREATE TABLE IF NOT EXISTS settings (
-  setting_id VARCHAR(32) PRIMARY KEY,
+  setting_id VARCHAR(36) PRIMARY KEY,
   setting_key VARCHAR(100) NOT NULL UNIQUE,
   setting_value JSONB,
   description TEXT,

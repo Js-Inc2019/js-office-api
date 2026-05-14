@@ -1,5 +1,5 @@
 // ============================================================
-// routes/audit.js - 監査ログ・改ざん検知
+// routes/audit.js - 監査ログ・改ざん検知 (PostgreSQL対応)
 // ============================================================
 
 const express = require('express');
@@ -9,7 +9,7 @@ const { checkPermission } = require('../middleware/auth');
 require('dotenv').config();
 
 // ============================================================
-// 1. 監査ログ一覧を取得（事務用）
+// 1. 監査ログ一覧を取得 (事務用)
 // ============================================================
 
 router.get('/', checkPermission('view_audit_logs'), async (req, res) => {
@@ -24,59 +24,61 @@ router.get('/', checkPermission('view_audit_logs'), async (req, res) => {
       offset = 0
     } = req.query;
 
-    const connection = await pool.getConnection();
-
     try {
       // SQL を構築
       let whereClause = 'WHERE 1=1';
       let params = [];
+      let paramIndex = 1;
 
       if (start_date) {
-        whereClause += ' AND DATE(timestamp) >= ?';
+        whereClause += ` AND DATE(timestamp) >= $${paramIndex}`;
         params.push(start_date);
+        paramIndex++;
       }
 
       if (end_date) {
-        whereClause += ' AND DATE(timestamp) <= ?';
+        whereClause += ` AND DATE(timestamp) <= $${paramIndex}`;
         params.push(end_date);
+        paramIndex++;
       }
 
       if (user_id) {
-        whereClause += ' AND user_id = ?';
+        whereClause += ` AND user_id = $${paramIndex}`;
         params.push(user_id);
+        paramIndex++;
       }
 
       if (action_type) {
-        whereClause += ' AND action_type = ?';
+        whereClause += ` AND action_type = $${paramIndex}`;
         params.push(action_type);
+        paramIndex++;
       }
 
       if (target_table) {
-        whereClause += ' AND target_table = ?';
+        whereClause += ` AND target_table = $${paramIndex}`;
         params.push(target_table);
+        paramIndex++;
       }
 
-      // 総件数を取得
-      const [countResult] = await connection.query(
+      // 件数を取得
+      const countResult = await pool.query(
         `SELECT COUNT(*) as total FROM audit_logs ${whereClause}`,
         params
       );
 
-      const totalCount = countResult[0].total;
+      const totalCount = parseInt(countResult.rows[0].total);
 
       // ログを取得
-      const [logs] = await connection.query(
-        `SELECT * FROM audit_logs 
+      const logsResult = await pool.query(
+        `SELECT * FROM audit_logs
          ${whereClause}
-         ORDER BY timestamp DESC 
-         LIMIT ? OFFSET ?`,
+         ORDER BY timestamp DESC
+         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
         [...params, parseInt(limit), parseInt(offset)]
       );
 
-      await connection.release();
-
       // JSON データをパース
-      const formattedLogs = logs.map(log => ({
+      const formattedLogs = logsResult.rows.map(log => ({
         log_id: log.log_id,
         user_id: log.user_id,
         user_name: log.user_name,
@@ -84,8 +86,8 @@ router.get('/', checkPermission('view_audit_logs'), async (req, res) => {
         action_type: log.action_type,
         target_table: log.target_table,
         target_id: log.target_id,
-        changes_before: log.changes_before ? JSON.parse(log.changes_before) : null,
-        changes_after: log.changes_after ? JSON.parse(log.changes_after) : null,
+        changes_before: log.changes_before ? (typeof log.changes_before === 'string' ? JSON.parse(log.changes_before) : log.changes_before) : null,
+        changes_after: log.changes_after ? (typeof log.changes_after === 'string' ? JSON.parse(log.changes_after) : log.changes_after) : null,
         timestamp: log.timestamp,
         ip_address: log.ip_address
       }));
@@ -102,7 +104,6 @@ router.get('/', checkPermission('view_audit_logs'), async (req, res) => {
       });
 
     } catch (error) {
-      await connection.release();
       throw error;
     }
 
@@ -124,42 +125,38 @@ router.get('/user/:user_id', checkPermission('view_audit_logs'), async (req, res
     const { user_id } = req.params;
     const { limit = 50, offset = 0 } = req.query;
 
-    const connection = await pool.getConnection();
-
     try {
       // ユーザーの操作履歴を取得
-      const [logs] = await connection.query(
-        `SELECT * FROM audit_logs 
-         WHERE user_id = ?
-         ORDER BY timestamp DESC 
-         LIMIT ? OFFSET ?`,
+      const logsResult = await pool.query(
+        `SELECT * FROM audit_logs
+         WHERE user_id = $1
+         ORDER BY timestamp DESC
+         LIMIT $2 OFFSET $3`,
         [user_id, parseInt(limit), parseInt(offset)]
       );
 
       // ユーザー情報を取得
-      const [users] = await connection.query(
-        'SELECT user_id, name, role, company FROM users WHERE user_id = ?',
+      const userResult = await pool.query(
+        'SELECT user_id, name, role, company FROM users WHERE user_id = $1',
         [user_id]
       );
 
-      await connection.release();
-
-      if (!users || users.length === 0) {
+      if (!userResult.rows || userResult.rows.length === 0) {
         return res.status(404).json({
           error: 'ユーザーが見つかりません',
           code: 'USER_NOT_FOUND'
         });
       }
 
-      const user = users[0];
-      const formattedLogs = logs.map(log => ({
+      const user = userResult.rows[0];
+      const formattedLogs = logsResult.rows.map(log => ({
         log_id: log.log_id,
         action_type: log.action_type,
         target_table: log.target_table,
         target_id: log.target_id,
         changes: {
-          before: log.changes_before ? JSON.parse(log.changes_before) : null,
-          after: log.changes_after ? JSON.parse(log.changes_after) : null
+          before: log.changes_before ? (typeof log.changes_before === 'string' ? JSON.parse(log.changes_before) : log.changes_before) : null,
+          after: log.changes_after ? (typeof log.changes_after === 'string' ? JSON.parse(log.changes_after) : log.changes_after) : null
         },
         timestamp: log.timestamp,
         ip_address: log.ip_address
@@ -173,12 +170,11 @@ router.get('/user/:user_id', checkPermission('view_audit_logs'), async (req, res
           role: user.role,
           company: user.company
         },
-        operation_count: logs.length,
+        operation_count: logsResult.rows.length,
         logs: formattedLogs
       });
 
     } catch (error) {
-      await connection.release();
       throw error;
     }
 
@@ -199,52 +195,48 @@ router.get('/report/:report_id', checkPermission('view_audit_logs'), async (req,
   try {
     const { report_id } = req.params;
 
-    const connection = await pool.getConnection();
-
     try {
       // 日報の全操作を取得
-      const [logs] = await connection.query(
-        `SELECT * FROM audit_logs 
-         WHERE target_id = ? OR (target_table = 'reports' AND target_id LIKE ?)
+      const logsResult = await pool.query(
+        `SELECT * FROM audit_logs
+         WHERE target_id = $1 OR (target_table = 'reports' AND target_id LIKE $2)
          ORDER BY timestamp ASC`,
         [report_id, `%${report_id}%`]
       );
 
       // 日報情報を取得
-      const [reports] = await connection.query(
-        'SELECT report_id, worker_name, report_date, is_sent FROM reports WHERE report_id = ?',
+      const reportResult = await pool.query(
+        'SELECT report_id, worker_name, report_date, is_sent FROM reports WHERE report_id = $1',
         [report_id]
       );
 
       // 修正依頼情報を取得
-      const [revisions] = await connection.query(
-        'SELECT revision_id, approval_status FROM revisions WHERE report_id = ?',
+      const revisionResult = await pool.query(
+        'SELECT revision_id, approval_status FROM revisions WHERE report_id = $1',
         [report_id]
       );
 
-      await connection.release();
-
-      if (!reports || reports.length === 0) {
+      if (!reportResult.rows || reportResult.rows.length === 0) {
         return res.status(404).json({
           error: '日報が見つかりません',
           code: 'REPORT_NOT_FOUND'
         });
       }
 
-      const report = reports[0];
-      const revisionHistory = revisions.map(r => ({
+      const report = reportResult.rows[0];
+      const revisionHistory = revisionResult.rows.map(r => ({
         revision_id: r.revision_id,
         status: r.approval_status
       }));
 
-      const formattedLogs = logs.map(log => ({
+      const formattedLogs = logsResult.rows.map(log => ({
         log_id: log.log_id,
         user_id: log.user_id,
         user_name: log.user_name,
         action_type: log.action_type,
         changes: {
-          before: log.changes_before ? JSON.parse(log.changes_before) : null,
-          after: log.changes_after ? JSON.parse(log.changes_after) : null
+          before: log.changes_before ? (typeof log.changes_before === 'string' ? JSON.parse(log.changes_before) : log.changes_before) : null,
+          after: log.changes_after ? (typeof log.changes_after === 'string' ? JSON.parse(log.changes_after) : log.changes_after) : null
         },
         timestamp: log.timestamp
       }));
@@ -262,7 +254,6 @@ router.get('/report/:report_id', checkPermission('view_audit_logs'), async (req,
       });
 
     } catch (error) {
-      await connection.release();
       throw error;
     }
 
@@ -276,18 +267,14 @@ router.get('/report/:report_id', checkPermission('view_audit_logs'), async (req,
 });
 
 // ============================================================
-// 4. 改ざん検知（承認済み日報が修正されていないか確認）
+// 4. 改ざん検知：承認後に修正依頼が入っていないか確認
 // ============================================================
 
 router.get('/tamper-detection', checkPermission('view_audit_logs'), async (req, res) => {
   try {
-    const { start_date, end_date } = req.query;
-
-    const connection = await pool.getConnection();
-
     try {
       // 1. 承認済み修正依頼
-      const [approvedRevisions] = await connection.query(
+      const approvalsResult = await pool.query(
         `SELECT r.revision_id, r.report_id, r.approved_at, rpt.worker_name, rpt.report_date
          FROM revisions r
          JOIN reports rpt ON r.report_id = rpt.report_id
@@ -295,19 +282,21 @@ router.get('/tamper-detection', checkPermission('view_audit_logs'), async (req, 
          ORDER BY r.approved_at DESC`
       );
 
-      // 2. 各報告に対する承認後の操作を調査
+      const approvedRevisions = approvalsResult.rows;
       const tamperAlerts = [];
 
+      // 2. 各日報に対する承認後の操作を調査
       for (const revision of approvedRevisions) {
-        const [latestLogs] = await connection.query(
-          `SELECT * FROM audit_logs 
-           WHERE target_id = ? AND action_type = 'update' AND timestamp > ?
+        const logsResult = await pool.query(
+          `SELECT * FROM audit_logs
+           WHERE target_id = $1 AND action_type = 'update' AND timestamp > $2
            ORDER BY timestamp DESC`,
           [revision.report_id, revision.approved_at]
         );
 
-        if (latestLogs && latestLogs.length > 0) {
+        if (logsResult.rows && logsResult.rows.length > 0) {
           // 承認後に更新があった！
+          const latestLog = logsResult.rows[0];
           tamperAlerts.push({
             alert_type: 'POST_APPROVAL_UPDATE',
             revision_id: revision.revision_id,
@@ -316,11 +305,11 @@ router.get('/tamper-detection', checkPermission('view_audit_logs'), async (req, 
             report_date: revision.report_date,
             approved_at: revision.approved_at,
             suspicious_update: {
-              updated_by: latestLogs[0].user_name,
-              updated_at: latestLogs[0].timestamp,
+              updated_by: latestLog.user_name,
+              updated_at: latestLog.timestamp,
               change: {
-                before: latestLogs[0].changes_before ? JSON.parse(latestLogs[0].changes_before) : null,
-                after: latestLogs[0].changes_after ? JSON.parse(latestLogs[0].changes_after) : null
+                before: latestLog.changes_before ? (typeof latestLog.changes_before === 'string' ? JSON.parse(latestLog.changes_before) : latestLog.changes_before) : null,
+                after: latestLog.changes_after ? (typeof latestLog.changes_after === 'string' ? JSON.parse(latestLog.changes_after) : latestLog.changes_after) : null
               }
             },
             severity: 'HIGH'
@@ -329,16 +318,16 @@ router.get('/tamper-detection', checkPermission('view_audit_logs'), async (req, 
       }
 
       // 3. 短時間に複数の修正が入った場合
-      const [suspiciousReports] = await connection.query(
-        `SELECT target_id, COUNT(*) as update_count, 
+      const suspiciousResult = await pool.query(
+        `SELECT target_id, COUNT(*) as update_count,
                 MIN(timestamp) as first_update, MAX(timestamp) as last_update
          FROM audit_logs
          WHERE action_type = 'update' AND target_table = 'reports'
          GROUP BY target_id
-         HAVING update_count > 5`
+         HAVING COUNT(*) > 5`
       );
 
-      for (const report of suspiciousReports || []) {
+      for (const report of suspiciousResult.rows || []) {
         tamperAlerts.push({
           alert_type: 'RAPID_MODIFICATIONS',
           report_id: report.target_id,
@@ -351,23 +340,20 @@ router.get('/tamper-detection', checkPermission('view_audit_logs'), async (req, 
         });
       }
 
-      await connection.release();
-
       res.status(200).json({
         success: true,
         tamper_alerts: {
           count: tamperAlerts.length,
-          alerts: tamperAlerts.sort((a, b) => 
+          alerts: tamperAlerts.sort((a, b) =>
             a.severity === 'HIGH' ? -1 : 1
           )
         },
-        recommendation: tamperAlerts.length > 0 
-          ? '⚠️ 不審な操作が検出されました。詳細を確認してください'
-          : '✅ 改ざんは検出されませんでした'
+        recommendation: tamperAlerts.length > 0
+          ? '⚠️  不審な操作が検知されました。詳細を確認してください'
+          : '✅ 改ざんは検知されませんでした'
       });
 
     } catch (error) {
-      await connection.release();
       throw error;
     }
 
@@ -381,33 +367,41 @@ router.get('/tamper-detection', checkPermission('view_audit_logs'), async (req, 
 });
 
 // ============================================================
-// 5. 操作統計を取得（ダッシュボード用）
+// 5. 操作統計を取得 (ダッシュボード用)
 // ============================================================
 
 router.get('/stats/daily', checkPermission('view_audit_logs'), async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
 
-    const connection = await pool.getConnection();
-
     try {
       // 日別操作統計
-      const [dailyStats] = await connection.query(
-        `SELECT 
+      const dailyParams = [];
+      let dailyWhere = '1=1';
+      if (start_date) {
+        dailyWhere += ` AND DATE(timestamp) >= $${dailyParams.length + 1}`;
+        dailyParams.push(start_date);
+      }
+      if (end_date) {
+        dailyWhere += ` AND DATE(timestamp) <= $${dailyParams.length + 1}`;
+        dailyParams.push(end_date);
+      }
+
+      const dailyResult = await pool.query(
+        `SELECT
           DATE(timestamp) as date,
           action_type,
           COUNT(*) as count
          FROM audit_logs
-         ${start_date ? 'WHERE DATE(timestamp) >= ?' : ''}
-         ${end_date ? 'AND DATE(timestamp) <= ?' : ''}
+         WHERE ${dailyWhere}
          GROUP BY DATE(timestamp), action_type
          ORDER BY date DESC`,
-        [start_date, end_date].filter(Boolean)
+        dailyParams
       );
 
       // ユーザー別操作統計
-      const [userStats] = await connection.query(
-        `SELECT 
+      const userResult = await pool.query(
+        `SELECT
           user_name,
           user_role,
           COUNT(*) as operation_count,
@@ -419,9 +413,9 @@ router.get('/stats/daily', checkPermission('view_audit_logs'), async (req, res) 
          LIMIT 20`
       );
 
-      // 操作種別別統計
-      const [actionStats] = await connection.query(
-        `SELECT 
+      // 操作別別統計
+      const actionResult = await pool.query(
+        `SELECT
           action_type,
           COUNT(*) as count,
           COUNT(DISTINCT user_id) as user_count
@@ -430,19 +424,16 @@ router.get('/stats/daily', checkPermission('view_audit_logs'), async (req, res) 
          ORDER BY count DESC`
       );
 
-      await connection.release();
-
       res.status(200).json({
         success: true,
         statistics: {
-          daily: dailyStats,
-          by_user: userStats,
-          by_action: actionStats
+          daily: dailyResult.rows,
+          by_user: userResult.rows,
+          by_action: actionResult.rows
         }
       });
 
     } catch (error) {
-      await connection.release();
       throw error;
     }
 
@@ -456,49 +447,46 @@ router.get('/stats/daily', checkPermission('view_audit_logs'), async (req, res) 
 });
 
 // ============================================================
-// 6. ログをエクスポート（CSV/JSON）
+// 6. ログをエクスポート (CSV/JSON)
 // ============================================================
 
 router.post('/export', checkPermission('view_audit_logs'), async (req, res) => {
   try {
     const { format = 'json', start_date, end_date } = req.body;
 
-    const connection = await pool.getConnection();
-
     try {
       // ログを取得
-      const [logs] = await connection.query(
-        `SELECT * FROM audit_logs 
-         WHERE DATE(timestamp) BETWEEN ? AND ?
+      const logsResult = await pool.query(
+        `SELECT * FROM audit_logs
+         WHERE DATE(timestamp) BETWEEN $1 AND $2
          ORDER BY timestamp DESC`,
         [start_date || '2000-01-01', end_date || '2099-12-31']
       );
 
-      await connection.release();
+      const logs = logsResult.rows;
 
       if (format === 'csv') {
         // CSV形式
         const csv = convertToCSV(logs);
         res.status(200)
-          .header('Content-Type', 'text/csv; charset=utf-8')
-          .header('Content-Disposition', `attachment; filename="audit_logs_${new Date().toISOString().slice(0, 10)}.csv"`)
+          .set('Content-Type', 'text/csv; charset=utf-8')
+          .set('Content-Disposition', `attachment; filename="audit_logs_${new Date().toISOString().slice(0, 10)}.csv"`)
           .send(csv);
       } else {
         // JSON形式
         const json = logs.map(log => ({
           ...log,
-          changes_before: log.changes_before ? JSON.parse(log.changes_before) : null,
-          changes_after: log.changes_after ? JSON.parse(log.changes_after) : null
+          changes_before: log.changes_before ? (typeof log.changes_before === 'string' ? JSON.parse(log.changes_before) : log.changes_before) : null,
+          changes_after: log.changes_after ? (typeof log.changes_after === 'string' ? JSON.parse(log.changes_after) : log.changes_after) : null
         }));
 
         res.status(200)
-          .header('Content-Type', 'application/json; charset=utf-8')
-          .header('Content-Disposition', `attachment; filename="audit_logs_${new Date().toISOString().slice(0, 10)}.json"`)
+          .set('Content-Type', 'application/json; charset=utf-8')
+          .set('Content-Disposition', `attachment; filename="audit_logs_${new Date().toISOString().slice(0, 10)}.json"`)
           .json(json);
       }
 
     } catch (error) {
-      await connection.release();
       throw error;
     }
 
@@ -526,12 +514,12 @@ function convertToCSV(logs) {
   for (const log of logs) {
     const row = [
       log.log_id,
-      `"${log.user_name}"`,
+      `"${log.user_name || ''}"`,
       log.action_type,
       log.target_table,
       log.target_id,
       log.timestamp,
-      log.ip_address
+      log.ip_address || ''
     ];
     csv.push(row.join(','));
   }

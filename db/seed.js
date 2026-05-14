@@ -8,7 +8,6 @@ async function seedUsers() {
     const result = await pool.query(
       `INSERT INTO users (device_id, name, company, role, pin_hash, is_active)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (device_id) DO UPDATE SET pin_hash = $5
        RETURNING user_id, device_id, name`,
       ['test-device-001', 'テスト太郎', 'J\'s Inc', 'admin', pinHash, true]
     );

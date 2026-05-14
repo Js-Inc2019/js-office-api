@@ -13,36 +13,24 @@ require('dotenv').config();
 
 const pool = require('./db/connection');
 
-// ============================================================
-// PostgreSQL スキーマ自動実行
-// ============================================================
-
-const fs = require('fs');
-const path = require('path');
-
-(async () => {
-  try {
-    const client = await pool.connect();
-    console.log('📝 スキーマ実行を開始します...');
-    
-    const schemaPath = path.join(__dirname, 'db', 'schema.sql');
-    const schema = fs.readFileSync(schemaPath, 'utf8');
-    
-    console.log(`📄 schema.sql サイズ: ${schema.length} bytes`);
-    
-    await client.query(schema);
-    
-    console.log('✅ スキーマ実行完了');
-    client.release();
-  } catch (err) {
-    console.error('❌ スキーマ実行エラー:', err.message);
-    console.error('詳細:', err);
-  }
-})();
-
 console.log('ℹ️  PostgreSQL 接続初期化完了');
 
+// ============================================================
+// ミドルウェア・ルートのインポート
+// ============================================================
+
+const { authenticateToken } = require('./middleware/auth');
+const authRoutes = require('./routes/auth');
+const reportRoutes = require('./routes/reports');
+const revisionRoutes = require('./routes/revisions');
+const auditRoutes = require('./routes/audit');
+
+// ============================================================
+// Express アプリ初期化
+// ============================================================
+
 const app = express();
+
 // ============================================================
 // グローバルミドルウェア
 // ============================================================
@@ -74,7 +62,7 @@ app.get('/health', (req, res) => {
 });
 
 // ============================================================
-// API ルート（一時的に無効化）
+// API ルート（有効化）
 // ============================================================
 
 app.use('/api/v1/auth', authRoutes);
@@ -82,7 +70,7 @@ app.use('/api/v1/reports', authenticateToken, reportRoutes);
 app.use('/api/v1/revisions', authenticateToken, revisionRoutes);
 app.use('/api/v1/audit-logs', authenticateToken, auditRoutes);
 
-console.log('ℹ️  API ルートは一時的に無効化されています');
+console.log('✅ API ルートが有効化されました');
 
 // ============================================================
 // エラーハンドリング

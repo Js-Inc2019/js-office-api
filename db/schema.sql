@@ -1,30 +1,22 @@
--- ============================================================
--- db/schema.sql - J's Inc. 勤務管理システム データベーススキーマ
--- ============================================================
-
--- ============================================================
--- users テーブル
+﻿-- ============================================================
+-- db/schema.sql - J's Inc. 勤務管理システム データベーススキーマ (PostgreSQL)
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS users (
   user_id VARCHAR(32) PRIMARY KEY,
   name VARCHAR(50) NOT NULL,
   company VARCHAR(100),
-  role ENUM('worker','boss','admin_office','admin_exec') DEFAULT 'worker',
+  role VARCHAR(20) DEFAULT 'worker' CHECK (role IN ('worker','boss','admin_office','admin_exec')),
   pin_hash VARCHAR(255) NOT NULL,
   device_id VARCHAR(100),
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  
-  INDEX idx_role (role),
-  INDEX idx_device_id (device_id),
-  INDEX idx_name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- ============================================================
--- reports テーブル
--- ============================================================
+CREATE INDEX idx_role ON users(role);
+CREATE INDEX idx_device_id ON users(device_id);
+CREATE INDEX idx_name ON users(name);
 
 CREATE TABLE IF NOT EXISTS reports (
   report_id VARCHAR(32) PRIMARY KEY,
@@ -47,62 +39,48 @@ CREATE TABLE IF NOT EXISTS reports (
   revision_requested BOOLEAN DEFAULT FALSE,
   boss_note TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  
-  INDEX idx_device_id (device_id),
-  INDEX idx_report_date (report_date),
-  INDEX idx_worker_name (worker_name),
-  UNIQUE KEY uk_device_date (device_id, report_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(device_id, report_date)
+);
 
--- ============================================================
--- revisions テーブル
--- ============================================================
+CREATE INDEX idx_device_id_reports ON reports(device_id);
+CREATE INDEX idx_report_date ON reports(report_date);
+CREATE INDEX idx_worker_name ON reports(worker_name);
 
 CREATE TABLE IF NOT EXISTS revisions (
   revision_id VARCHAR(32) PRIMARY KEY,
-  report_id VARCHAR(32) NOT NULL,
+  report_id VARCHAR(32) NOT NULL REFERENCES reports(report_id) ON DELETE CASCADE,
   revision_requester VARCHAR(50) NOT NULL,
-  revision_reason JSON,
+  revision_reason JSONB,
   revision_comment TEXT,
   requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   response_deadline TIMESTAMP,
-  resubmitted_data JSON,
+  resubmitted_data JSONB,
   resubmitted_at TIMESTAMP,
-  approval_status ENUM('pending','approved','rejected') DEFAULT 'pending',
+  approval_status VARCHAR(20) DEFAULT 'pending' CHECK (approval_status IN ('pending','approved','rejected')),
   approver_id VARCHAR(50),
   approved_at TIMESTAMP,
-  approval_comment TEXT,
-  
-  FOREIGN KEY (report_id) REFERENCES reports(report_id) ON DELETE CASCADE,
-  INDEX idx_report_id (report_id),
-  INDEX idx_approval_status (approval_status),
-  INDEX idx_requested_at (requested_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  approval_comment TEXT
+);
 
--- ============================================================
--- hierarchy テーブル
--- ============================================================
+CREATE INDEX idx_report_id_revisions ON revisions(report_id);
+CREATE INDEX idx_approval_status ON revisions(approval_status);
+CREATE INDEX idx_requested_at ON revisions(requested_at);
 
 CREATE TABLE IF NOT EXISTS hierarchy (
   hierarchy_id VARCHAR(32) PRIMARY KEY,
-  parent_report_id VARCHAR(32) NOT NULL,
+  parent_report_id VARCHAR(32) NOT NULL REFERENCES reports(report_id) ON DELETE CASCADE,
   parent_boss_id VARCHAR(50) NOT NULL,
   higher_boss_id VARCHAR(50),
   report_content TEXT,
   report_sent_at TIMESTAMP,
   report_approved_at TIMESTAMP,
-  approval_status ENUM('pending','approved','rejected') DEFAULT 'pending',
-  approval_comment TEXT,
-  
-  FOREIGN KEY (parent_report_id) REFERENCES reports(report_id) ON DELETE CASCADE,
-  INDEX idx_parent_boss_id (parent_boss_id),
-  INDEX idx_higher_boss_id (higher_boss_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  approval_status VARCHAR(20) DEFAULT 'pending' CHECK (approval_status IN ('pending','approved','rejected')),
+  approval_comment TEXT
+);
 
--- ============================================================
--- audit_logs テーブル
--- ============================================================
+CREATE INDEX idx_parent_boss_id ON hierarchy(parent_boss_id);
+CREATE INDEX idx_higher_boss_id ON hierarchy(higher_boss_id);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   log_id VARCHAR(32) PRIMARY KEY,
@@ -112,46 +90,38 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   action_type VARCHAR(50) NOT NULL,
   target_table VARCHAR(50),
   target_id VARCHAR(32),
-  changes_before JSON,
-  changes_after JSON,
+  changes_before JSONB,
+  changes_after JSONB,
   timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  ip_address VARCHAR(45),
-  
-  INDEX idx_timestamp (timestamp),
-  INDEX idx_user_id (user_id),
-  INDEX idx_action_type (action_type),
-  INDEX idx_target_id (target_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  ip_address VARCHAR(45)
+);
 
--- ============================================================
--- settings テーブル
--- ============================================================
+CREATE INDEX idx_timestamp ON audit_logs(timestamp);
+CREATE INDEX idx_user_id ON audit_logs(user_id);
+CREATE INDEX idx_action_type ON audit_logs(action_type);
+CREATE INDEX idx_target_id ON audit_logs(target_id);
 
 CREATE TABLE IF NOT EXISTS settings (
   setting_id VARCHAR(32) PRIMARY KEY,
   setting_key VARCHAR(100) NOT NULL UNIQUE,
-  setting_value JSON,
+  setting_value JSONB,
   description TEXT,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  
-  INDEX idx_setting_key (setting_key)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- ============================================================
--- 初期データ挿入
--- ============================================================
+CREATE INDEX idx_setting_key ON settings(setting_key);
 
-INSERT IGNORE INTO users (user_id, name, company, role, pin_hash, is_active)
+INSERT INTO users (user_id, name, company, role, pin_hash, is_active)
 VALUES 
-  ('boss_001', '山本 親方', '株式会社J\'s', 'boss', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWdeS86E36P4/KFm', TRUE),
-  ('admin_001', '事務 太郎', '株式会社J\'s', 'admin_office', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcg7b3XeKeUxWdeS86E36P4/KFm', TRUE);
+  ('boss_001', '山本 親方', '株式会社J''s', 'boss', '/KFm', TRUE),
+  ('admin_001', '事務 太郎', '株式会社J''s', 'admin_office', '/KFm', TRUE)
+ON CONFLICT (user_id) DO NOTHING;
 
-INSERT IGNORE INTO settings (setting_id, setting_key, setting_value, description)
+INSERT INTO settings (setting_id, setting_key, setting_value, description)
 VALUES 
-  ('setting_001', 'standard_work_hours', '{\"hours\": 8, \"start\": \"08:00\", \"end\": \"17:00\"}', '標準勤務時間'),
-  ('setting_002', 'overtime_multiplier', '{\"rate\": 1.25}', '残業単価倍率'),
-  ('setting_003', 'revision_deadline_default', '{\"days\": 1}', '修正依頼デフォルト期限');
+  ('setting_001', 'standard_work_hours', '{"hours": 8, "start": "08:00", "end": "17:00"}', '標準勤務時間'),
+  ('setting_002', 'overtime_multiplier', '{"rate": 1.25}', '残業単価倍率'),
+  ('setting_003', 'revision_deadline_default', '{"days": 1}', '修正依頼デフォルト期限')
+ON CONFLICT (setting_id) DO NOTHING;
 
-SET FOREIGN_KEY_CHECKS = 1;
-FLUSH PRIVILEGES;
 COMMIT;

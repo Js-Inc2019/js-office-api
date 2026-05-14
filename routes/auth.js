@@ -1,5 +1,5 @@
 // ============================================================
-// routes/auth.js - 認証ルート
+// routes/auth.js - 認証ルート (PostgreSQL対応)
 // ============================================================
 
 const express = require('express');
@@ -20,75 +20,65 @@ router.post('/verify-pin', async (req, res) => {
 
     if (!pin || !device_id) {
       return res.status(400).json({
-        error: 'PIN とデバイスID が必要です',
+        error: 'PIN とデバイスID が必須です',
         code: 'MISSING_FIELDS'
       });
     }
 
-    const connection = await pool.getConnection();
+    // PostgreSQL で device_id からユーザーを検索
+    const result = await pool.query(
+      'SELECT user_id, name, company, role, pin_hash FROM users WHERE device_id = $1 AND is_active = TRUE',
+      [device_id]
+    );
 
-    try {
-      // デバイスIDからユーザーを検索
-      const [users] = await connection.query(
-        'SELECT user_id, name, company, role, pin_hash FROM users WHERE device_id = ? AND is_active = TRUE',
-        [device_id]
-      );
-
-      await connection.release();
-
-      if (!users || users.length === 0) {
-        return res.status(401).json({
-          error: 'デバイスが登録されていません',
-          code: 'DEVICE_NOT_REGISTERED'
-        });
-      }
-
-      const user = users[0];
-
-      // PIN を検証
-      const pinMatch = await bcrypt.compare(pin, user.pin_hash);
-
-      if (!pinMatch) {
-        return res.status(401).json({
-          error: 'PIN が正しくありません',
-          code: 'INVALID_PIN'
-        });
-      }
-
-      // JWT トークンを生成
-      const token = jwt.sign(
-        {
-          user_id: user.user_id,
-          name: user.name,
-          company: user.company,
-          role: user.role,
-          device_id: device_id
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRATION || '24h' }
-      );
-
-      res.status(200).json({
-        success: true,
-        token: token,
-        user: {
-          user_id: user.user_id,
-          name: user.name,
-          company: user.company,
-          role: user.role
-        },
-        expires_in: process.env.JWT_EXPIRATION || '24h'
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(401).json({
+        error: 'デバイスが登録されていません',
+        code: 'DEVICE_NOT_REGISTERED'
       });
-
-    } catch (error) {
-      await connection.release();
-      throw error;
     }
 
+    const user = result.rows[0];
+
+    // PIN を検証
+    const pinMatch = await bcrypt.compare(pin, user.pin_hash);
+
+    if (!pinMatch) {
+      return res.status(401).json({
+        error: 'PIN が正しくありません',
+        code: 'INVALID_PIN'
+      });
+    }
+
+    // JWT トークンを生成
+    const token = jwt.sign(
+      {
+        user_id: user.user_id,
+        name: user.name,
+        company: user.company,
+        role: user.role,
+        device_id: device_id
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRATION || '24h' }
+    );
+
+    res.status(200).json({
+      success: true,
+      token: token,
+      user: {
+        user_id: user.user_id,
+        name: user.name,
+        company: user.company,
+        role: user.role
+      },
+      expires_in: process.env.JWT_EXPIRATION || '24h'
+    });
+
   } catch (error) {
-    console.error('PIN 検証エラー:', error);
+    console.error('PIN 認証エラー:', error);
     res.status(500).json({
-      error: 'PIN 検証に失敗しました',
+      error: 'PIN 認証に失敗しました',
       code: 'PIN_VERIFY_ERROR'
     });
   }
@@ -104,7 +94,7 @@ router.post('/verify-token', (req, res) => {
 
   if (!token) {
     return res.status(401).json({
-      error: 'トークンが必要です',
+      error: 'トークンが必須です',
       code: 'NO_TOKEN'
     });
   }
@@ -156,56 +146,44 @@ router.post('/change-pin', async (req, res) => {
       });
     }
 
-    const connection = await pool.getConnection();
+    // device_id からユーザーを検索
+    const result = await pool.query(
+      'SELECT user_id, pin_hash FROM users WHERE device_id = $1',
+      [device_id]
+    );
 
-    try {
-      // デバイスIDからユーザーを検索
-      const [users] = await connection.query(
-        'SELECT user_id, pin_hash FROM users WHERE device_id = ?',
-        [device_id]
-      );
-
-      if (!users || users.length === 0) {
-        await connection.release();
-        return res.status(404).json({
-          error: 'ユーザーが見つかりません',
-          code: 'USER_NOT_FOUND'
-        });
-      }
-
-      const user = users[0];
-
-      // 現在の PIN を検証
-      const pinMatch = await bcrypt.compare(old_pin, user.pin_hash);
-
-      if (!pinMatch) {
-        await connection.release();
-        return res.status(401).json({
-          error: '現在の PIN が正しくありません',
-          code: 'INVALID_PIN'
-        });
-      }
-
-      // 新しい PIN をハッシュ化
-      const newPinHash = await bcrypt.hash(new_pin, parseInt(process.env.BCRYPT_ROUNDS) || 10);
-
-      // PIN を更新
-      await connection.query(
-        'UPDATE users SET pin_hash = ? WHERE user_id = ?',
-        [newPinHash, user.user_id]
-      );
-
-      await connection.release();
-
-      res.status(200).json({
-        success: true,
-        message: 'PIN を変更しました'
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'ユーザーが見つかりません',
+        code: 'USER_NOT_FOUND'
       });
-
-    } catch (error) {
-      await connection.release();
-      throw error;
     }
+
+    const user = result.rows[0];
+
+    // 現在の PIN を検証
+    const pinMatch = await bcrypt.compare(old_pin, user.pin_hash);
+
+    if (!pinMatch) {
+      return res.status(401).json({
+        error: '現在の PIN が正しくありません',
+        code: 'INVALID_PIN'
+      });
+    }
+
+    // 新しい PIN をハッシュ化
+    const newPinHash = await bcrypt.hash(new_pin, parseInt(process.env.BCRYPT_ROUNDS) || 10);
+
+    // PIN を更新
+    await pool.query(
+      'UPDATE users SET pin_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+      [newPinHash, user.user_id]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'PIN を変更しました'
+    });
 
   } catch (error) {
     console.error('PIN 変更エラー:', error);

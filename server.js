@@ -12,38 +12,18 @@ const authRoutes = require('./routes/auth');
 const reportRoutes = require('./routes/reports');
 const revisionRoutes = require('./routes/revisions');
 const auditRoutes = require('./routes/audit');
+
+// ミドルウェアのインポート
+const { authenticateToken } = require('./middleware/auth');
 // ============================================================
-// PostgreSQL スキーマ自動実行
+// PostgreSQL スキーマ自動実行（一時的に無効化）
 // ============================================================
 
 const fs = require('fs');
 const path = require('path');
 const pool = require('./db/connection');
 
-// アプリ起動時にスキーマを実行
-// アプリ起動時にスキーマを実行
-(async () => {
-  try {
-    const client = await pool.connect();
-    console.log('📝 スキーマ実行を開始します...');
-    
-    const schemaPath = path.join(__dirname, 'db', 'schema.sql');
-    const schema = fs.readFileSync(schemaPath, 'utf8');
-    
-    console.log(`📄 schema.sql サイズ: ${schema.length} bytes`);
-    
-    await client.query(schema);
-    
-    console.log('✅ スキーマ実行完了');
-    client.release();
-  } catch (err) {
-    console.error('❌ スキーマ実行エラー:', err.message);
-    console.error('詳細:', err);
-  }
-})();
-// ミドルウェアのインポート
-const { authenticateToken } = require('./middleware/auth');
-
+console.log('⚠️  スキーマ自動実行は一時的に無効化されています');
 const app = express();
 
 // ============================================================

@@ -7,24 +7,42 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-// ミドルウェアのインポート
-const { authenticateToken } = require('./middleware/auth');
-
-// ルートのインポート（一時的にコメントアウト）
-// const authRoutes = require('./routes/auth');
-// const reportRoutes = require('./routes/reports');
-// const revisionRoutes = require('./routes/revisions');
-// const auditRoutes = require('./routes/audit');
-
 // ============================================================
 // PostgreSQL 接続
 // ============================================================
 
 const pool = require('./db/connection');
+
+// ============================================================
+// PostgreSQL スキーマ自動実行
+// ============================================================
+
+const fs = require('fs');
+const path = require('path');
+
+(async () => {
+  try {
+    const client = await pool.connect();
+    console.log('📝 スキーマ実行を開始します...');
+    
+    const schemaPath = path.join(__dirname, 'db', 'schema.sql');
+    const schema = fs.readFileSync(schemaPath, 'utf8');
+    
+    console.log(`📄 schema.sql サイズ: ${schema.length} bytes`);
+    
+    await client.query(schema);
+    
+    console.log('✅ スキーマ実行完了');
+    client.release();
+  } catch (err) {
+    console.error('❌ スキーマ実行エラー:', err.message);
+    console.error('詳細:', err);
+  }
+})();
+
 console.log('ℹ️  PostgreSQL 接続初期化完了');
 
 const app = express();
-
 // ============================================================
 // グローバルミドルウェア
 // ============================================================

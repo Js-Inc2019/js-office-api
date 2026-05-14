@@ -1,5 +1,4 @@
 const pool = require('./connection');
-const bcrypt = require('bcryptjs');
 
 async function seedUsers() {
   try {
@@ -9,13 +8,13 @@ async function seedUsers() {
       `INSERT INTO users (device_id, name, company, role, pin_hash, is_active)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING user_id, device_id, name`,
-      ['test-device-001', 'テスト太郎', 'J\'s Inc', 'admin', pinHash, true]
+      ['test-device-001', 'Test User', 'J\'s Inc', 'admin', pinHash, true]
     );
     
-    console.log('✅ ユーザー作成完了:', result.rows[0]);
+    console.log('User created:', result.rows[0]);
     process.exit(0);
   } catch (error) {
-    console.error('❌ エラー:', error);
+    console.error('Error:', error.message);
     process.exit(1);
   }
 }

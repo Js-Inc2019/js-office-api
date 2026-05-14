@@ -80,4 +80,28 @@ app.use((req, res) => {
 
 // ============================================================
 // サーバー起動
-// ===========================================
+// ============================================================
+
+const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0'; // Heroku では 0.0.0.0 にバインド
+
+const server = app.listen(PORT, HOST, () => {
+  console.log(`
+  ========================================
+  J's Inc. 勤務管理システム API
+  ========================================
+  サーバー起動: http://${HOST}:${PORT}
+  環境: ${process.env.NODE_ENV || 'development'}
+  ========================================
+  `);
+});
+
+// グレースフルシャットダウン
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
+});
+
+module.exports = { app };

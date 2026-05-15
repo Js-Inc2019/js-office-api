@@ -27,6 +27,23 @@ const path = require('path');
     const client = await pool.connect();
     console.log('📝 スキーマ実行を開始します...');
     
+    // テーブル削除（初回セットアップ用）
+    try {
+      await client.query(`
+        DROP TABLE IF EXISTS authentication_logs CASCADE;
+        DROP TABLE IF EXISTS devices CASCADE;
+        DROP TABLE IF EXISTS users CASCADE;
+        DROP TABLE IF EXISTS reports CASCADE;
+        DROP TABLE IF EXISTS revisions CASCADE;
+        DROP TABLE IF EXISTS hierarchy CASCADE;
+        DROP TABLE IF EXISTS audit_logs CASCADE;
+        DROP TABLE IF EXISTS settings CASCADE;
+      `);
+      console.log('✅ 古いテーブルを削除しました');
+    } catch (e) {
+      console.log('ℹ️ テーブル削除スキップ');
+    }
+    
     const schemaPath = path.join(__dirname, 'db', 'schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf8');
     
@@ -38,12 +55,36 @@ const path = require('path');
     await client.query(cleanSchema);
     
     console.log('✅ スキーマ実行完了');
+
+    console.log('✅ スキーマ実行完了');
+    
+    // ============================================================
+    // デフォルトユーザーを自動作成
+    // ============================================================
+    
+    const bcrypt = require('bcrypt');
+    const { v4: uuidv4 } = require('uuid');
+    
+    try {
+      const user_id = uuidv4();
+      const pin_hash = await bcrypt.hash('1234', 10);
+      
+      await client.query(
+        `INSERT INTO users (user_id, name, company, role, pin_hash, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [user_id, 'テスト太郎', 'J\'s Inc.', 'worker', pin_hash, true]
+      );
+      
+      console.log('✅ デフォルトユーザーを作成しました');
+      console.log('  PIN: 1234');
+    } catch (e) {
+      console.log('ℹ️ デフォルトユーザー作成スキップ（既に存在）');
+    }
     client.release();
   } catch (err) {
     console.error('❌ スキーマ実行エラー:', err.message);
   }
 })();
-
 // ============================================================
 // ミドルウェア・ルートのインポート
 // ============================================================

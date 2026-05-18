@@ -16,84 +16,33 @@ const pool = require('./db/connection');
 console.log('ℹ️  PostgreSQL 接続初期化完了');
 
 // ============================================================
-// PostgreSQL スキーマ自動実行
+// DB接続確認のみ（スキーマ自動実行・DROP TABLE は廃止）
+// ※ テーブル変更は migrate_v2.js で手動実行すること
 // ============================================================
-
-const fs = require('fs');
-const path = require('path');
 
 (async () => {
   try {
     const client = await pool.connect();
-    console.log('📝 スキーマ実行を開始します...');
-    
-    // テーブル削除（初回セットアップ用）
-    try {
-      await client.query(`
-        DROP TABLE IF EXISTS authentication_logs CASCADE;
-        DROP TABLE IF EXISTS devices CASCADE;
-        DROP TABLE IF EXISTS users CASCADE;
-        DROP TABLE IF EXISTS reports CASCADE;
-        DROP TABLE IF EXISTS revisions CASCADE;
-        DROP TABLE IF EXISTS hierarchy CASCADE;
-        DROP TABLE IF EXISTS audit_logs CASCADE;
-        DROP TABLE IF EXISTS settings CASCADE;
-      `);
-      console.log('✅ 古いテーブルを削除しました');
-    } catch (e) {
-      console.log('ℹ️ テーブル削除スキップ');
-    }
-    
-    const schemaPath = path.join(__dirname, 'db', 'schema.sql');
-    const schema = fs.readFileSync(schemaPath, 'utf8');
-    
-    // BOM を削除
-    const cleanSchema = schema.replace(/^\ufeff/, '');
-    
-    console.log(`📄 schema.sql サイズ: ${cleanSchema.length} bytes`);
-    
-    await client.query(cleanSchema);
-    
-    console.log('✅ スキーマ実行完了');
-
-    console.log('✅ スキーマ実行完了');
-    
-    // ============================================================
-    // デフォルトユーザーを自動作成
-    // ============================================================
-    
-    const bcrypt = require('bcrypt');
-    const { v4: uuidv4 } = require('uuid');
-    
-    try {
-      const user_id = uuidv4();
-      const pin_hash = await bcrypt.hash('1234', 10);
-      
-      await client.query(
-        `INSERT INTO users (user_id, name, company, role, pin_hash, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [user_id, 'テスト太郎', 'J\'s Inc.', 'worker', pin_hash, true]
-      );
-      
-      console.log('✅ デフォルトユーザーを作成しました');
-      console.log('  PIN: 1234');
-    } catch (e) {
-      console.log('ℹ️ デフォルトユーザー作成スキップ（既に存在）');
-    }
+    const result = await client.query('SELECT COUNT(*) FROM users');
+    console.log(`✅ DB接続確認完了 - ユーザー数: ${result.rows[0].count}`);
     client.release();
   } catch (err) {
-    console.error('❌ スキーマ実行エラー:', err.message);
+    console.error('❌ DB接続確認エラー:', err.message);
   }
 })();
+
 // ============================================================
 // ミドルウェア・ルートのインポート
 // ============================================================
 
 const { authenticateToken } = require('./middleware/auth');
-const authRoutes = require('./routes/auth');
-const reportRoutes = require('./routes/reports');
-const revisionRoutes = require('./routes/revisions');
-const auditRoutes = require('./routes/audit');
+const authRoutes      = require('./routes/auth');
+const reportRoutes    = require('./routes/reports');
+const revisionRoutes  = require('./routes/revisions');
+const auditRoutes     = require('./routes/audit');
+const companyRoutes   = require('./routes/companies');
+const siteRoutes      = require('./routes/sites');
+const shareRoutes     = require('./routes/shares');
 
 // ============================================================
 // Express アプリ初期化
@@ -126,21 +75,27 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    version: '1.0.0',
+    version: '2.0.0',
     database: 'connected'
   });
 });
 
 // ============================================================
-// API ルート（有効化）
+// API ルート
 // ============================================================
 
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/reports', authenticateToken, reportRoutes);
-app.use('/api/v1/revisions', authenticateToken, revisionRoutes);
-app.use('/api/v1/audit-logs', authenticateToken, auditRoutes);
+// 既存ルート
+app.use('/api/v1/auth',        authRoutes);
+app.use('/api/v1/reports',     authenticateToken, reportRoutes);
+app.use('/api/v1/revisions',   authenticateToken, revisionRoutes);
+app.use('/api/v1/audit-logs',  authenticateToken, auditRoutes);
 
-console.log('✅ API ルートが有効化されました');
+// 新規ルート（v2拡張）
+app.use('/api/v1/companies',   authenticateToken, companyRoutes);
+app.use('/api/v1/sites',       authenticateToken, siteRoutes);
+app.use('/api/v1/shares',      authenticateToken, shareRoutes);
+
+console.log('✅ API ルートが有効化されました（v2拡張含む）');
 
 // ============================================================
 // エラーハンドリング
@@ -159,12 +114,12 @@ app.use((req, res) => {
 // ============================================================
 
 const PORT = process.env.PORT || 3000;
-const HOST = '0.0.0.0'; // Heroku では 0.0.0.0 にバインド
+const HOST = '0.0.0.0';
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`
   ========================================
-  J's Inc. 勤務管理システム API
+  J's Inc. 勤務管理システム API v2.0.0
   ========================================
   サーバー起動: http://${HOST}:${PORT}
   環境: ${process.env.NODE_ENV || 'development'}
@@ -172,7 +127,6 @@ const server = app.listen(PORT, HOST, () => {
   `);
 });
 
-// グレースフルシャットダウン
 process.on('SIGTERM', () => {
   console.log('SIGTERM signal received: closing HTTP server');
   server.close(() => {

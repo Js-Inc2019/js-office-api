@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // routes/auth.js - 認証ルート
 // 全ユーザーPIN認証・company_id・role対応
 // ============================================================
@@ -17,7 +17,7 @@ require('dotenv').config();
 
 router.post('/register', async (req, res) => {
   try {
-    const { name, phone_number, email, pin, device_name, device_type, os_type } = req.body;
+    const { name, phone_number, email, pin, device_name, device_type, os_type, role } = req.body;
 
     if (!name || !pin || !device_name || !device_type) {
       return res.status(400).json({
@@ -52,7 +52,7 @@ router.post('/register', async (req, res) => {
       await client.query(
         `INSERT INTO users (user_id, name, phone_number, email, role, pin_hash, is_active, company_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'company_js_001')`,
-        [user_id, name, phone_number || null, email || null, 'worker', pin_hash, true]
+        [user_id, name, phone_number || null, email || null, role || 'worker', pin_hash, true]
       );
 
       const device_id = uuidv4();

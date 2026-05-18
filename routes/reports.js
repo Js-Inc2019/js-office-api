@@ -1,361 +1,182 @@
 // ============================================================
-// routes/auth.js - 認証ルート (PostgreSQL対応)
-// 拡張版：ユーザー登録・デバイス管理・複数認証対応
+// routes/reports.js - 日報管理API
 // ============================================================
 
 const express = require('express');
-const router = express.Router();
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const pool = require('../db/connection');
+const router  = express.Router();
 const { v4: uuidv4 } = require('uuid');
-require('dotenv').config();
+const pool    = require('../db/connection');
 
 // ============================================================
-// ユーザー登録エンドポイント
-// POST /api/v1/auth/register
+// POST /api/v1/reports - 日報送信
 // ============================================================
 
-router.post('/register', async (req, res) => {
+router.post('/', async (req, res) => {
   try {
-    const { name, phone_number, email, pin, device_name, device_type, os_type } = req.body;
+    const { user_id, company_id } = req.user;
 
-    // バリデーション
-    if (!name || !pin || !device_name || !device_type) {
+    const {
+      worker_name,
+      worker_company,
+      report_date,
+      clock_in_time,
+      clock_out_time,
+      transport_type,
+      parking_fee,
+      parking_photo_url,
+      site_photo_url,
+      gps_address,
+      site_name,
+      work_content,
+      memo,
+      weather,
+      temperature,
+      site_id,
+    } = req.body;
+
+    if (!worker_name || !report_date || !clock_in_time) {
       return res.status(400).json({
-        error: '必須フィールドが不足しています',
-        code: 'MISSING_FIELDS',
-        required: ['name', 'pin', 'device_name', 'device_type']
+        success: false,
+        error:   '名前・日付・出勤時刻は必須です'
       });
     }
 
-    // PIN のバリデーション（4〜6桁）
-    if (!/^\d{4,6}$/.test(pin)) {
-      return res.status(400).json({
-        error: 'PIN は 4〜6 桁の数字である必要があります',
-        code: 'INVALID_PIN_FORMAT'
-      });
-    }
+    const report_id = uuidv4();
 
-    // device_type のバリデーション
-    const validDeviceTypes = ['smartphone', 'tablet', 'pc'];
-    if (!validDeviceTypes.includes(device_type)) {
-      return res.status(400).json({
-        error: 'device_type は smartphone, tablet, pc のいずれかである必要があります',
-        code: 'INVALID_DEVICE_TYPE'
-      });
-    }
-
-    // トランザクション開始
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // ユーザーIDを生成
-      const user_id = `user_${uuidv4()}`;
-      
-      // PIN をハッシュ化
-      const pin_hash = await bcrypt.hash(pin, parseInt(process.env.BCRYPT_ROUNDS) || 10);
-
-      // users テーブルに挿入
-      await client.query(
-        `INSERT INTO users (user_id, name, phone_number, email, role, pin_hash, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [user_id, name, phone_number || null, email || null, 'worker', pin_hash, true]
-      );
-
-      // デバイスIDを生成
-      const device_id = `device_${uuidv4()}`;
-
-      // devices テーブルに挿入
-      await client.query(
-        `INSERT INTO devices (device_id, user_id, device_name, device_type, os_type, is_primary, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [device_id, user_id, device_name, device_type, os_type || null, true, true]
-      );
-
-      await client.query('COMMIT');
-
-      // JWT トークンを生成
-      const token = jwt.sign(
-        {
-          user_id: user_id,
-          name: name,
-          device_id: device_id,
-          role: 'worker'
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRATION || '24h' }
-      );
-
-      res.status(201).json({
-        success: true,
-        message: 'ユーザーとデバイスを登録しました',
-        token: token,
-        user: {
-          user_id: user_id,
-          name: name,
-          phone_number: phone_number || null,
-          email: email || null,
-          role: 'worker'
-        },
-        device: {
-          device_id: device_id,
-          device_name: device_name,
-          device_type: device_type
-        },
-        expires_in: process.env.JWT_EXPIRATION || '24h'
-      });
-
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-
-  } catch (error) {
-    console.error('ユーザー登録エラー:', error);
-    res.status(500).json({
-      error: 'ユーザー登録に失敗しました',
-      code: 'REGISTER_ERROR',
-      message: error.message
-    });
-  }
-});
-
-// ============================================================
-// PIN 認証 + JWT トークン発行
-// POST /api/v1/auth/verify-pin
-// ============================================================
-
-router.post('/verify-pin', async (req, res) => {
-  try {
-    const { pin, device_id } = req.body;
-
-    if (!pin || !device_id) {
-      return res.status(400).json({
-        error: 'PIN とデバイスID が必須です',
-        code: 'MISSING_FIELDS'
-      });
-    }
-
-    // device_id からユーザー情報を取得
+    // デバイスIDを取得
     const deviceResult = await pool.query(
-      `SELECT d.user_id, u.name, u.company, u.role, u.pin_hash, u.is_active
-       FROM devices d
-       JOIN users u ON d.user_id = u.user_id
-       WHERE d.device_id = $1 AND d.is_active = TRUE`,
-      [device_id]
+      `SELECT device_id FROM devices WHERE user_id = $1 AND is_active = TRUE LIMIT 1`,
+      [user_id]
     );
+    const device_id = deviceResult.rows[0]?.device_id || uuidv4();
 
-    if (!deviceResult.rows || deviceResult.rows.length === 0) {
-      return res.status(401).json({
-        error: 'デバイスが登録されていません',
-        code: 'DEVICE_NOT_REGISTERED'
-      });
-    }
+    await pool.query(`
+      INSERT INTO reports (
+        report_id, device_id, user_id,
+        worker_name, worker_company,
+        report_date, clock_in_time, clock_out_time,
+        transport_type, parking_fee,
+        parking_photo_url, site_photo_url,
+        gps_address, site_name,
+        work_content, memo,
+        weather, temperature,
+        is_sent, is_pinned,
+        revision_requested, site_id
+      ) VALUES (
+        $1, $2, $3,
+        $4, $5,
+        $6, $7, $8,
+        $9, $10,
+        $11, $12,
+        $13, $14,
+        $15, $16,
+        $17, $18,
+        TRUE, FALSE,
+        FALSE, $19
+      )
+      ON CONFLICT (user_id, report_date) DO UPDATE SET
+        worker_name       = EXCLUDED.worker_name,
+        transport_type    = EXCLUDED.transport_type,
+        parking_fee       = EXCLUDED.parking_fee,
+        gps_address       = EXCLUDED.gps_address,
+        site_name         = EXCLUDED.site_name,
+        work_content      = EXCLUDED.work_content,
+        memo              = EXCLUDED.memo,
+        updated_at        = CURRENT_TIMESTAMP
+    `, [
+      report_id, device_id, user_id,
+      worker_name, worker_company || null,
+      report_date, clock_in_time, clock_out_time || null,
+      transport_type || null, parking_fee || null,
+      parking_photo_url || null, site_photo_url || null,
+      gps_address || null, site_name || null,
+      work_content || null, memo || null,
+      weather || null, temperature || null,
+      site_id || null
+    ]);
 
-    const user = deviceResult.rows[0];
+    console.log(`✅ 日報受信: ${worker_name} (${report_date})`);
 
-    // ユーザーが有効か確認
-    if (!user.is_active) {
-      return res.status(401).json({
-        error: 'ユーザーが無効です',
-        code: 'USER_INACTIVE'
-      });
-    }
-
-    // PIN を検証
-    const pinMatch = await bcrypt.compare(pin, user.pin_hash);
-
-    if (!pinMatch) {
-      // 認証ログを記録（失敗）
-      await pool.query(
-        `INSERT INTO authentication_logs (auth_log_id, device_id, user_id, auth_method, auth_status, timestamp)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-        [uuidv4(), device_id, user.user_id, 'pin', 'failed']
-      );
-
-      return res.status(401).json({
-        error: 'PIN が正しくありません',
-        code: 'INVALID_PIN'
-      });
-    }
-
-    // JWT トークンを生成
-    const token = jwt.sign(
-      {
-        user_id: user.user_id,
-        name: user.name,
-        company: user.company,
-        role: user.role,
-        device_id: device_id
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRATION || '24h' }
-    );
-
-    // 認証ログを記録（成功）
-    await pool.query(
-      `INSERT INTO authentication_logs (auth_log_id, device_id, user_id, auth_method, auth_status, timestamp)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-      [uuidv4(), device_id, user.user_id, 'pin', 'success']
-    );
-
-    // デバイスの最終使用時刻を更新
-    await pool.query(
-      `UPDATE devices SET last_used_at = CURRENT_TIMESTAMP WHERE device_id = $1`,
-      [device_id]
-    );
-
-    res.status(200).json({
-      success: true,
-      token: token,
-      user: {
-        user_id: user.user_id,
-        name: user.name,
-        company: user.company,
-        role: user.role
-      },
-      expires_in: process.env.JWT_EXPIRATION || '24h'
+    res.status(201).json({
+      success:   true,
+      message:   '日報を受信しました',
+      report_id: report_id
     });
 
-  } catch (error) {
-    console.error('PIN 認証エラー:', error);
-    res.status(500).json({
-      error: 'PIN 認証に失敗しました',
-      code: 'PIN_VERIFY_ERROR'
-    });
+  } catch (err) {
+    console.error('日報受信エラー:', err.message);
+    res.status(500).json({ success: false, error: 'サーバーエラー' });
   }
 });
 
 // ============================================================
-// トークン検証
-// POST /api/v1/auth/verify-token
+// GET /api/v1/reports - 日報一覧取得
 // ============================================================
 
-router.post('/verify-token', (req, res) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({
-      error: 'トークンが必須です',
-      code: 'NO_TOKEN'
-    });
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      if (err.name === 'TokenExpiredError') {
-        return res.status(401).json({
-          error: 'トークンの有効期限が切れました',
-          code: 'TOKEN_EXPIRED'
-        });
-      }
-      return res.status(403).json({
-        error: 'トークンが無効です',
-        code: 'INVALID_TOKEN'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      user: user
-    });
-  });
-});
-
-// ============================================================
-// ログアウト
-// POST /api/v1/auth/logout
-// ============================================================
-
-router.post('/logout', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'ログアウトしました'
-  });
-});
-
-// ============================================================
-// PIN 変更
-// POST /api/v1/auth/change-pin
-// ============================================================
-
-router.post('/change-pin', async (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const { device_id, old_pin, new_pin } = req.body;
+    const { user_id, role, company_id } = req.user;
+    const { date, limit = 50 } = req.query;
 
-    if (!device_id || !old_pin || !new_pin) {
-      return res.status(400).json({
-        error: '必須フィールドが不足しています',
-        code: 'MISSING_FIELDS'
-      });
+    let query;
+    let params;
+
+    if (role === 'worker') {
+      // 職人は自分の日報のみ
+      query = `
+        SELECT * FROM reports
+        WHERE user_id = $1
+        ${date ? 'AND report_date = $2' : ''}
+        ORDER BY report_date DESC, created_at DESC
+        LIMIT $${date ? 3 : 2}
+      `;
+      params = date ? [user_id, date, limit] : [user_id, limit];
+    } else {
+      // 職長・事務は自社の全日報
+      query = `
+        SELECT r.* FROM reports r
+        JOIN users u ON r.user_id = u.user_id
+        WHERE u.company_id = $1
+        ${date ? 'AND r.report_date = $2' : ''}
+        ORDER BY r.report_date DESC, r.created_at DESC
+        LIMIT $${date ? 3 : 2}
+      `;
+      params = date ? [company_id, date, limit] : [company_id, limit];
     }
 
-    // 新しい PIN のバリデーション
-    if (!/^\d{4,6}$/.test(new_pin)) {
-      return res.status(400).json({
-        error: 'PIN は 4〜6 桁の数字である必要があります',
-        code: 'INVALID_PIN_FORMAT'
-      });
-    }
+    const result = await pool.query(query, params);
 
-    // device_id からユーザーを取得
-    const result = await pool.query(
-      `SELECT u.user_id, u.pin_hash
-       FROM users u
-       JOIN devices d ON u.user_id = d.user_id
-       WHERE d.device_id = $1`,
-      [device_id]
-    );
-
-    if (!result.rows || result.rows.length === 0) {
-      return res.status(404).json({
-        error: 'ユーザーが見つかりません',
-        code: 'USER_NOT_FOUND'
-      });
-    }
-
-    const user = result.rows[0];
-
-    // 現在の PIN を検証
-    const pinMatch = await bcrypt.compare(old_pin, user.pin_hash);
-
-    if (!pinMatch) {
-      return res.status(401).json({
-        error: '現在の PIN が正しくありません',
-        code: 'INVALID_PIN'
-      });
-    }
-
-    // 新しい PIN をハッシュ化
-    const newPinHash = await bcrypt.hash(new_pin, parseInt(process.env.BCRYPT_ROUNDS) || 10);
-
-    // PIN を更新
-    await pool.query(
-      `UPDATE users SET pin_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2`,
-      [newPinHash, user.user_id]
-    );
-
-    res.status(200).json({
+    res.json({
       success: true,
-      message: 'PIN を変更しました'
+      reports: result.rows
     });
-
-  } catch (error) {
-    console.error('PIN 変更エラー:', error);
-    res.status(500).json({
-      error: 'PIN 変更に失敗しました',
-      code: 'PIN_CHANGE_ERROR'
-    });
+  } catch (err) {
+    console.error('日報一覧取得エラー:', err.message);
+    res.status(500).json({ success: false, error: 'サーバーエラー' });
   }
 });
 
 // ============================================================
-// エクスポート
+// GET /api/v1/reports/:report_id - 日報詳細
 // ============================================================
+
+router.get('/:report_id', async (req, res) => {
+  try {
+    const { report_id } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM reports WHERE report_id = $1',
+      [report_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: '日報が見つかりません' });
+    }
+
+    res.json({ success: true, report: result.rows[0] });
+  } catch (err) {
+    console.error('日報詳細取得エラー:', err.message);
+    res.status(500).json({ success: false, error: 'サーバーエラー' });
+  }
+});
 
 module.exports = router;

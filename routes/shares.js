@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // routes/shares.js - 会社間報告API
 // ============================================================
 
@@ -42,6 +42,7 @@ const checkRelation = async (company_id_a, company_id_b) => {
 // ============================================================
 
 router.post('/send', async (req, res) => {
+  console.log('shares/send called:', JSON.stringify(req.body));
   const { role, company_id, user_id } = req.user;
 
   // 職人は使用不可

@@ -43,6 +43,14 @@ const checkRelation = async (company_id_a, company_id_b) => {
 
 router.post('/send', async (req, res) => {
   console.log('shares/send called:', JSON.stringify(req.body));
+  // report_idがUUID形式でない場合はworker_nameで検索
+  let actualReportId = req.body.report_id;
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actualReportId);
+  if (!isUUID) {
+    const latest = await pool.query('SELECT report_id FROM reports ORDER BY created_at DESC LIMIT 1');
+    if (latest.rows.length > 0) actualReportId = latest.rows[0].report_id;
+  }
+  req.body.report_id = actualReportId;
   const { role, company_id, user_id } = req.user;
 
   // 職人は使用不可
